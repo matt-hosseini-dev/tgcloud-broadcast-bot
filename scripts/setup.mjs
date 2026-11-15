@@ -37,21 +37,24 @@ function run(cmd, args) {
   if (r.status !== 0) throw new Error(`"${cmd} ${args.join(' ')}" failed.`);
 }
 
-async function askOwners() {
-  const current = readEnvFile(ENV_FILE).OWNER_IDS;
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+/**
+ * Asks for owner ids until they parse. Reads input line by line, so piped
+ * answers are not lost. Enter keeps `current`.
+ */
+export async function askOwners({ input, output, current }) {
+  const rl = createInterface({ input, terminal: false });
+  const lines = rl[Symbol.asyncIterator]();
   try {
-    console.log('Owners manage targets and broadcasters. Get your id from @userinfobot.');
+    output.write('Owners manage targets and broadcasters. Get your id from @userinfobot.\n');
     for (;;) {
       const hint = current ? ` [${current}]` : '';
-      const answer = (
-        await rl.question(`Owner Telegram user ids, comma separated${hint}: `)
-      ).trim();
-      const raw = answer || current;
+      output.write(`Owner Telegram user ids, comma separated${hint}: `);
+      const next = await lines.next();
+      if (next.done) throw new Error('No input: setup was cancelled.');
       try {
-        return parseOwnerIds(raw).join(',');
+        return parseOwnerIds(next.value.trim() || current).join(',');
       } catch (err) {
-        console.log(`  ${err.message}`);
+        output.write(`  ${err.message}\n`);
       }
     }
   } finally {
@@ -69,7 +72,11 @@ async function main() {
   }
 
   step('Owners');
-  const owners = await askOwners();
+  const owners = await askOwners({
+    input: process.stdin,
+    output: process.stdout,
+    current: readEnvFile(ENV_FILE).OWNER_IDS,
+  });
   writeFileSync(ENV_FILE, renderEnv(readEnvFile(ENV_FILE), { OWNER_IDS: owners }));
   writeConfig();
 
