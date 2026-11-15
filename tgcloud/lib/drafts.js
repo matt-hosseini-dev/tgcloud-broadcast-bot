@@ -3,16 +3,44 @@
 // Publish / Cancel buttons. Albums arrive as one invocation per item, so the
 // "first" is decided by the database (see store.openDraft), not by the caller.
 import * as store from './store.js';
-import { DRAFT_CANCELLED, DRAFT_STARTED, draftKeyboard } from './report.js';
+import { DRAFT_CANCELLED, DRAFT_EXPIRED, DRAFT_STARTED, draftKeyboard } from './report.js';
+
+/** An open draft with no new message for this long is discarded on the next message. */
+export const DRAFT_IDLE_SECONDS = 60 * 60;
 
 /** @returns {Promise<{ draftId: number, created: boolean }>} */
 export async function addToDraft(deps, message) {
-  const { api, db } = deps;
+  const { db } = deps;
   const userId = message.from.id;
-  const chatId = message.chat.id;
-  const { draft, created } = await store.openDraft(db, { userId, chatId, now: deps.now() });
-  await store.addDraftMessage(db, draft.id, message.message_id);
-  if (!created) return { draftId: draft.id, created };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await expireIdleDraft(deps, userId);
+    const { draft, created } = await store.openDraft(db, {
+      userId,
+      chatId: message.chat.id,
+      now: deps.now(),
+    });
+    const added = await store.addDraftMessage(db, draft.id, message.message_id);
+    if (!added && (await store.getDraft(db, draft.id))?.status !== 'open') {
+      continue; // Publish or Cancel closed the draft meanwhile: use a fresh one.
+    }
+    await store.touchDraft(db, draft.id, deps.now());
+    if (created) await sendControlMessage(deps, draft, message);
+    return { draftId: draft.id, created };
+  }
+  throw new Error(`could not add message ${message.message_id} to a draft`);
+}
+
+/** A forgotten draft would otherwise swallow the next post without any reply. */
+async function expireIdleDraft(deps, userId) {
+  const draft = await store.getOpenDraft(deps.db, userId);
+  if (draft && deps.now() - draft.updated_at > DRAFT_IDLE_SECONDS) {
+    await closeDraft(deps, draft, DRAFT_EXPIRED);
+  }
+}
+
+async function sendControlMessage(deps, draft, message) {
+  const { api, db } = deps;
+  const chatId = draft.chat_id;
 
   try {
     const control = await api.sendMessage({
@@ -28,7 +56,6 @@ export async function addToDraft(deps, message) {
     console.error('control message failed, cancelling draft', draft.id, err?.description ?? err);
     await store.cancelDraft(db, { draftId: draft.id, now: deps.now() });
   }
-  return { draftId: draft.id, created };
 }
 
 /** /cancel: discards the user's open draft. @returns {Promise<boolean>} */
@@ -45,13 +72,13 @@ export async function cancelDraftById(deps, { draftId, userId }) {
   return closeDraft(deps, draft);
 }
 
-async function closeDraft(deps, draft) {
+async function closeDraft(deps, draft, text = DRAFT_CANCELLED) {
   const done = await store.cancelDraft(deps.db, { draftId: draft.id, now: deps.now() });
   if (done && draft.control_message_id) {
     await editQuietly(deps.api, {
       chat_id: draft.chat_id,
       message_id: draft.control_message_id,
-      text: DRAFT_CANCELLED,
+      text,
     });
   }
   return done;

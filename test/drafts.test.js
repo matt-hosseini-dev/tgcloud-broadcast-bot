@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addToDraft, cancelOpenDraft, cancelDraftById } from '../tgcloud/lib/drafts.js';
+import {
+  addToDraft,
+  cancelOpenDraft,
+  cancelDraftById,
+  DRAFT_IDLE_SECONDS,
+} from '../tgcloud/lib/drafts.js';
 import * as store from '../tgcloud/lib/store.js';
 import { makeDeps, privateMessage, BROADCASTER } from './helpers/deps.js';
 
@@ -84,4 +89,56 @@ test('an edit failure on the control message does not undo the cancel', async ()
   deps.api.fail('editMessageText', 400, 'Bad Request: message to edit not found');
   assert.equal(await cancelOpenDraft(deps, BROADCASTER), true);
   assert.equal((await store.getDraft(deps.db, draftId)).status, 'cancelled');
+});
+
+test('a message that races a Publish claim goes into a new draft, not the claimed one', async () => {
+  const deps = makeDeps();
+  const first = await addToDraft(deps, privateMessage(BROADCASTER, 10));
+  const run = deps.db.run.bind(deps.db);
+  let raced = false;
+  deps.db.run = async (query, params) => {
+    if (!raced && query.includes('INSERT INTO draft_messages')) {
+      raced = true;
+      // Publish claims the draft between openDraft and the message insert.
+      await store.claimDraft(
+        { ...deps.db, run },
+        { draftId: first.draftId, userId: BROADCASTER, now: 0 },
+      );
+    }
+    return run(query, params);
+  };
+  const second = await addToDraft(deps, privateMessage(BROADCASTER, 11));
+  assert.notEqual(second.draftId, first.draftId);
+  assert.equal(second.created, true);
+  assert.deepEqual(await store.listDraftMessageIds(deps.db, first.draftId), [10]);
+  assert.deepEqual(await store.listDraftMessageIds(deps.db, second.draftId), [11]);
+  assert.equal(deps.api.callsOf('sendMessage').length, 2);
+});
+
+test('a re-sent message id is not a reason to start a new draft', async () => {
+  const deps = makeDeps();
+  const a = await addToDraft(deps, privateMessage(BROADCASTER, 10));
+  const b = await addToDraft(deps, privateMessage(BROADCASTER, 10));
+  assert.equal(b.draftId, a.draftId);
+  assert.equal(deps.api.callsOf('sendMessage').length, 1);
+});
+
+test('an idle open draft expires and the next message starts a new draft with its own buttons', async () => {
+  let now = 1_700_000_000;
+  const deps = makeDeps({ now: () => now });
+  const first = await addToDraft(deps, privateMessage(BROADCASTER, 10));
+  now += DRAFT_IDLE_SECONDS - 1;
+  const second = await addToDraft(deps, privateMessage(BROADCASTER, 11));
+  assert.equal(second.draftId, first.draftId, 'activity within the idle window keeps the draft');
+  now += DRAFT_IDLE_SECONDS - 1;
+  const third = await addToDraft(deps, privateMessage(BROADCASTER, 12));
+  assert.equal(third.draftId, first.draftId, 'the idle window counts from the last message');
+  now += DRAFT_IDLE_SECONDS + 1;
+  const fourth = await addToDraft(deps, privateMessage(BROADCASTER, 13));
+  assert.notEqual(fourth.draftId, first.draftId);
+  assert.equal(fourth.created, true);
+  assert.equal((await store.getDraft(deps.db, first.draftId)).status, 'cancelled');
+  assert.match(deps.api.callsOf('editMessageText')[0].text, /expired/i);
+  assert.equal(deps.api.callsOf('sendMessage').length, 2);
+  assert.deepEqual(await store.listDraftMessageIds(deps.db, fourth.draftId), [13]);
 });

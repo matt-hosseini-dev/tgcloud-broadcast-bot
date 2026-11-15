@@ -7,6 +7,9 @@ export const DRAFT_STARTED =
 
 export const DRAFT_CANCELLED = '🗑 Draft cancelled. Nothing was published.';
 
+export const DRAFT_EXPIRED =
+  '⌛ This draft expired after an hour without new messages and was discarded. Nothing was published.';
+
 /** Publish / Cancel buttons for a draft's control message. */
 export function draftKeyboard(draftId) {
   return {

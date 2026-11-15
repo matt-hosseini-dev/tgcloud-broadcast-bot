@@ -108,11 +108,27 @@ export async function openDraft(db, { userId, chatId, now }) {
   throw new Error(`could not open a draft for user ${userId}`);
 }
 
+/**
+ * Adds a message to a draft only while the draft is still open, so a message
+ * racing a Publish claim is never added to a draft that is already being sent.
+ * @returns {Promise<boolean>} false if the draft is closed or the message was already in it.
+ */
 export async function addDraftMessage(db, draftId, messageId) {
-  await db.run(
-    'INSERT INTO draft_messages (draft_id, message_id) VALUES (:d, :m) ON CONFLICT DO NOTHING',
+  const r = await db.run(
+    `INSERT INTO draft_messages (draft_id, message_id)
+     SELECT :d, :m WHERE EXISTS (SELECT 1 FROM drafts WHERE id = :d AND status = 'open')
+     ON CONFLICT DO NOTHING`,
     { ':d': draftId, ':m': messageId },
   );
+  return r.rowsAffected === 1;
+}
+
+/** Marks activity on an open draft (idle drafts expire). */
+export async function touchDraft(db, draftId, now) {
+  await db.run(`UPDATE drafts SET updated_at = :now WHERE id = :id AND status = 'open'`, {
+    ':now': now,
+    ':id': draftId,
+  });
 }
 
 /** @returns {Promise<number[]>} ascending, as copyMessages requires. */
