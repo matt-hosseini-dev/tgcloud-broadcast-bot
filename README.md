@@ -22,7 +22,7 @@ You need [Node.js](https://nodejs.org) 22.15+ and a Telegram bot.
 2. Run:
 
    ```sh
-   git clone https://github.com/<you>/tgcloud-broadcast-bot.git
+   git clone https://github.com/matt-hosseini-dev/tgcloud-broadcast-bot.git
    cd tgcloud-broadcast-bot
    npm run setup
    ```
