@@ -155,8 +155,8 @@ The platform manages the bot's webhook for you, derived from your deployed
 
 ## This project
 
-A broadcast bot: drafts in private chat → Publish → `copyMessages` to every channel →
-per-channel report with Retry failed. See [docs/architecture.md](docs/architecture.md).
+A broadcast bot: drafts in private chat → Publish → checklist of targets (channels,
+groups, users) → Send → `copyMessages` to each → per-target report with Retry. See [docs/architecture.md](docs/architecture.md).
 
 - Only `tgcloud/lib/container.js` imports `sdk`; every other `lib/` module takes
   `{ api, db, config, now, sleep }` as an argument. Keep it that way: it is how the

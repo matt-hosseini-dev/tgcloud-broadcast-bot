@@ -63,10 +63,10 @@ npx tgcloud run handlers/message '{ message_id: 1, from: { id: 1 }, chat: { id: 
 
 Then, with two throwaway channels where the test bot is admin:
 
-1. Send text with formatting, a photo with a caption, a 3-photo album and a document.
-   Publish each.
+1. `/start`, then add targets with 👤 👥 📢. Send text with formatting, a photo with a
+   caption, a 3-photo album and a document; Publish, untick one target, Send.
 2. Remove the bot's **Post messages** right in one channel and publish again. The
-   report should show the failure and **Retry failed**. Restore the right and press it.
+   report should show the failure and **Retry**. Restore the right and press it.
 
 ## Conventions
 

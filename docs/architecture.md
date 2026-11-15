@@ -33,9 +33,10 @@ tgcloud/
     router.js             dedupe, role check, command/button parsing and dispatch
     auth.js               owner (config) / broadcaster (db) / none
     drafts.js             collecting messages, control message, cancel
-    broadcast.js          fan-out, classification, 429 retry, report, Retry failed
+    broadcast.js          fan-out, classification, 429 retry, report, Retry
     report.js             user-facing texts and keyboards
-    channels.js           /addchannel, /channels, my_chat_member registration
+    targets.js            channels, groups, users: pickers, /add, list, my_chat_member
+    checklist.js          per-draft target selection before sending
     broadcasters.js       /addbroadcaster, /broadcasters
     store.js              all SQL
 scripts/write-config.mjs  OWNER_IDS -> tgcloud/lib/config.js
@@ -60,6 +61,19 @@ If Publish claimed the draft in between, the insert does nothing and the message
 into a fresh draft instead of being lost. An open draft with no new message for an
 hour is cancelled (its control message says so) when the next message arrives.
 
+### Choosing targets
+
+Owners get a reply keyboard whose 👤 / 👥 / 📢 buttons use `request_users` and
+`request_chat`. Telegram answers with a `users_shared` or `chat_shared` service message.
+Chats are checked with `getChat` + `getChatMember` (channels need **Post messages**;
+groups need a member allowed to send) and saved in `channels` with their `chat_type`.
+Users are saved as `private` targets. The 📢 button asks Telegram to grant the bot
+**Post messages**, and the 👥 button lists only groups the bot is in.
+
+**Publish** does not send yet. It edits the control message into a checklist of every
+enabled target. Unticked targets are rows in `draft_exclusions`, so new targets are
+ticked by default. **Send** starts the steps below with the ticked targets.
+
 ### Publishing
 
 1. **Claim.** `UPDATE drafts SET status = 'publishing', open_key = NULL WHERE id = ? AND
@@ -68,7 +82,7 @@ user_id = ? AND status = 'open'`. If no row changed, someone already published o
 2. **Answer the button** right away. The fan-out can take seconds and callback queries
    expire.
 3. **Fan out.** Every channel gets a `pending` delivery row first, and the control
-   message shows "Publishing…" with a **Retry failed** button for recovery. Then, for
+   message shows "Publishing…" with a **Retry** button for recovery. Then, for
    each enabled channel, concurrently (`Promise.allSettled`):
    `copyMessages({ chat_id, from_chat_id, message_ids })` with ids ascending, in chunks
    of 100. Each result is stored as soon as that channel settles.
@@ -82,11 +96,11 @@ user_id = ? AND status = 'open'`. If no row changed, someone already published o
    `setTimeout`, it is reported instead.
 
 5. **Report.** The control message is edited into the per-channel report. It gets
-   **Retry failed** if anything failed or never finished. If the edit fails, a new
+   **Retry** if anything failed or never finished. If the edit fails, a new
    message is sent. The report runs in a `finally`, so an error mid-way still produces
    one.
 
-### Retry failed
+### Retry
 
 Each retry run claims rows by setting their status to its own token
 (`retrying:<random>`) and then selects exactly those rows. Claimable rows are `failed`
