@@ -1,0 +1,14 @@
+# tgcloud CLI state (credentials, snapshot)
+.tgcloud/
+node_modules/
+
+# Secrets and per-deployment values: never commit
+.env
+.env.*
+!.env.example
+tgcloud/lib/config.js
+
+# Local tooling and private notes
+.claude/
+.superpowers/
+docs/plans/
