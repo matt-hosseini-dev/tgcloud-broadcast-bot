@@ -23,9 +23,26 @@ export function draftKeyboard(draftId) {
 }
 
 export const PUBLISHING = '⏳ Publishing…';
+export const RETRYING = '⏳ Retrying…';
+const IN_PROGRESS_HINT =
+  'If this message has not turned into a report after a few minutes, press Retry failed.';
+
+const retryKeyboard = (broadcastId) => [
+  [{ text: '🔁 Retry failed', callback_data: `retry:${broadcastId}` }],
+];
+
+/** Shown while sending. Its Retry button recovers a run that was interrupted. */
+export function progressView(broadcastId, text) {
+  return {
+    text: `${text}\n\n${IN_PROGRESS_HINT}`,
+    reply_markup: { inline_keyboard: retryKeyboard(broadcastId) },
+  };
+}
 
 const MAX_TEXT = 4096;
 const MAX_ERROR = 200;
+
+const FINAL = new Set(['sent', 'partial', 'skipped']);
 
 const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
@@ -38,9 +55,10 @@ function deliveryLine(d, total) {
       return `⚠️ ${title}: ${d.copied} of ${total} messages copied (some message types cannot be copied)`;
     case 'skipped':
       return `⏭ ${title}: ${clip(d.error ?? 'skipped', MAX_ERROR)}`;
-    case 'retrying':
-      return `⏳ ${title}: retrying…`;
+    case 'pending':
+      return `⏳ ${title}: sending…`;
     default:
+      if (d.status.startsWith('retrying')) return `⏳ ${title}: retrying…`;
       return `❌ ${title}: ${clip(d.error ?? 'failed', MAX_ERROR)}`;
   }
 }
@@ -65,14 +83,11 @@ export function renderReport({ broadcastId, total, deliveries }) {
     lines.push(line);
     length += line.length + 1;
   }
-  const anyFailed = deliveries.some((d) => d.status === 'failed');
+  // failed, or never finished (pending / retrying after an error): retry can pick them up.
+  const unfinished = deliveries.some((d) => !FINAL.has(d.status));
   return {
     text: lines.join('\n'),
-    reply_markup: {
-      inline_keyboard: anyFailed
-        ? [[{ text: '🔁 Retry failed', callback_data: `retry:${broadcastId}` }]]
-        : [],
-    },
+    reply_markup: { inline_keyboard: unfinished ? retryKeyboard(broadcastId) : [] },
   };
 }
 

@@ -165,6 +165,8 @@ test('broadcasts: create and read back with parsed message ids', async () => {
 });
 
 test('deliveries: upsert, list, claim failed for retry once', async () => {
+  const claim = (token) =>
+    store.claimDeliveriesForRetry(db, { broadcastId: 1, token, now: NOW, staleBefore: NOW - 120 });
   const db = createTestDb();
   const base = { broadcastId: 1, now: NOW };
   await store.upsertDelivery(db, {
@@ -199,10 +201,7 @@ test('deliveries: upsert, list, claim failed for retry once', async () => {
       ['C', 'failed'],
     ],
   );
-  const [first, second] = await Promise.all([
-    store.claimFailedDeliveries(db, 1, NOW),
-    store.claimFailedDeliveries(db, 1, NOW),
-  ]);
+  const [first, second] = await Promise.all([claim('retrying:a'), claim('retrying:b')]);
   const claimed = [first, second].sort((a, b) => b.length - a.length);
   assert.deepEqual(
     claimed[0].map((d) => d.chat_id).sort((x, y) => x - y),

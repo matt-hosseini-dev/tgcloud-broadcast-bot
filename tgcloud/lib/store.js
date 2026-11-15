@@ -232,20 +232,25 @@ export function listDeliveries(db, broadcastId) {
 }
 
 /**
- * failed -> retrying for every failed delivery of a broadcast. Only the caller
- * whose update flipped rows gets them back, so a double-tapped Retry runs once.
+ * Claims deliveries for a retry by setting their status to `token` (unique per
+ * retry run, e.g. "retrying:<random>") and returns exactly the rows it claimed.
+ * Claimable: failed rows, plus pending/retrying rows not touched since
+ * `staleBefore` (left behind by an interrupted run). Selecting by the run's own
+ * token means overlapping Retry taps never pick up each other's rows.
  */
-export async function claimFailedDeliveries(db, broadcastId, now) {
+export async function claimDeliveriesForRetry(db, { broadcastId, token, now, staleBefore }) {
   const r = await db.run(
-    `UPDATE deliveries SET status = 'retrying', updated_at = :now
-     WHERE broadcast_id = :b AND status = 'failed'`,
-    { ':b': broadcastId, ':now': now },
+    `UPDATE deliveries SET status = :tok, updated_at = :now
+     WHERE broadcast_id = :b
+       AND (status = 'failed'
+            OR ((status = 'pending' OR status LIKE 'retrying:%') AND updated_at < :stale))`,
+    { ':tok': token, ':now': now, ':b': broadcastId, ':stale': staleBefore },
   );
   if (r.rowsAffected === 0) return [];
   return db.all(
-    `SELECT * FROM deliveries WHERE broadcast_id = :b AND status = 'retrying'
+    `SELECT * FROM deliveries WHERE broadcast_id = :b AND status = :tok
      ORDER BY channel_title, chat_id`,
-    { ':b': broadcastId },
+    { ':b': broadcastId, ':tok': token },
   );
 }
 

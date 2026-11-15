@@ -3,12 +3,17 @@
 import * as store from './store.js';
 import { isOwner } from './auth.js';
 import { editQuietly } from './drafts.js';
-import { PUBLISHING, renderReport } from './report.js';
+import { PUBLISHING, RETRYING, progressView, renderReport } from './report.js';
 
 /** A 429 with a retry_after up to this many seconds is waited out once. */
 export const MAX_RETRY_AFTER = 5;
 /** copyMessages accepts at most 100 ids per call. */
 export const MAX_IDS_PER_CALL = 100;
+/**
+ * A pending or retrying delivery untouched for this long belongs to a run that
+ * was interrupted, and Retry may take it over.
+ */
+export const STALE_AFTER_SECONDS = 120;
 
 const describe = (err) => err?.description ?? err?.message ?? String(err);
 
@@ -46,32 +51,41 @@ export async function copyToChannel(deps, { fromChatId, chatId, messageIds }) {
   return { status: copied === messageIds.length ? 'sent' : 'partial', copied, error: null };
 }
 
-/** Delivers to the given channels concurrently and stores each result. */
+/**
+ * Delivers to the given channels concurrently. Each result is stored as soon as
+ * that channel settles, so an interrupted run leaves an accurate record. Never throws.
+ */
 async function deliver(deps, broadcast, targets) {
   const settled = await Promise.allSettled(
-    targets.map((t) =>
-      copyToChannel(deps, {
+    targets.map(async (t) => {
+      const r = await copyToChannel(deps, {
         fromChatId: broadcast.chat_id,
         chatId: t.chatId,
         messageIds: broadcast.message_ids,
-      }),
-    ),
+      });
+      await store.upsertDelivery(deps.db, {
+        broadcastId: broadcast.id,
+        chatId: t.chatId,
+        title: t.title,
+        status: r.status,
+        copied: r.copied,
+        error: r.error,
+        now: deps.now(),
+      });
+    }),
   );
-  for (const [i, s] of settled.entries()) {
-    const r =
-      s.status === 'fulfilled'
-        ? s.value
-        : { status: 'failed', copied: 0, error: describe(s.reason) };
-    await store.upsertDelivery(deps.db, {
-      broadcastId: broadcast.id,
-      chatId: targets[i].chatId,
-      title: targets[i].title,
-      status: r.status,
-      copied: r.copied,
-      error: r.error,
-      now: deps.now(),
-    });
+  for (const s of settled) {
+    if (s.status === 'rejected') console.error('delivery result not stored', describe(s.reason));
   }
+}
+
+async function showProgress(deps, broadcast, text) {
+  if (!broadcast.control_message_id) return;
+  await editQuietly(deps.api, {
+    chat_id: broadcast.chat_id,
+    message_id: broadcast.control_message_id,
+    ...progressView(broadcast.id, text),
+  });
 }
 
 /** Replaces the control message with the report; sends a new message if that fails. */
@@ -120,13 +134,6 @@ export async function publishDraft(deps, { draftId, userId, onStarted }) {
     return { ok: false, reason: 'empty' };
   }
 
-  if (draft.control_message_id) {
-    await editQuietly(deps.api, {
-      chat_id: draft.chat_id,
-      message_id: draft.control_message_id,
-      text: PUBLISHING,
-    });
-  }
   const broadcastId = await store.createBroadcast(db, {
     draftId,
     userId,
@@ -136,19 +143,32 @@ export async function publishDraft(deps, { draftId, userId, onStarted }) {
     now: deps.now(),
   });
   const broadcast = await store.getBroadcast(db, broadcastId);
-  await deliver(
-    deps,
-    broadcast,
-    channels.map((c) => ({ chatId: c.chat_id, title: c.title })),
-  );
-  await store.setDraftStatus(db, { draftId, status: 'published', now: deps.now() });
-  await showReport(deps, broadcast);
+  const targets = channels.map((c) => ({ chatId: c.chat_id, title: c.title }));
+  for (const t of targets) {
+    await store.upsertDelivery(db, {
+      broadcastId,
+      chatId: t.chatId,
+      title: t.title,
+      status: 'pending',
+      copied: 0,
+      error: null,
+      now: deps.now(),
+    });
+  }
+  await showProgress(deps, broadcast, PUBLISHING);
+  try {
+    await deliver(deps, broadcast, targets);
+  } finally {
+    await store.setDraftStatus(db, { draftId, status: 'published', now: deps.now() });
+    await showReport(deps, broadcast);
+  }
   return { ok: true, broadcastId };
 }
 
 /**
- * Retry failed button. Re-sends only to channels whose delivery failed; channels
- * removed from the bot since then are marked skipped.
+ * Retry failed button. Re-sends only to channels whose delivery failed (or was
+ * left unfinished by an interrupted run); channels removed from the bot since
+ * then are marked skipped.
  * @returns {Promise<{ ok: true } | { ok: false, reason: 'not_found' | 'not_allowed' | 'nothing_to_retry' }>}
  */
 export async function retryFailed(deps, { broadcastId, userId, onStarted }) {
@@ -158,28 +178,38 @@ export async function retryFailed(deps, { broadcastId, userId, onStarted }) {
   if (broadcast.user_id !== userId && !isOwner(deps, userId)) {
     return { ok: false, reason: 'not_allowed' };
   }
-  const claimed = await store.claimFailedDeliveries(db, broadcastId, deps.now());
+  const now = deps.now();
+  const claimed = await store.claimDeliveriesForRetry(db, {
+    broadcastId,
+    token: `retrying:${now}:${Math.random().toString(36).slice(2, 10)}`,
+    now,
+    staleBefore: now - STALE_AFTER_SECONDS,
+  });
   if (claimed.length === 0) return { ok: false, reason: 'nothing_to_retry' };
   await onStarted?.();
+  await showProgress(deps, broadcast, RETRYING);
 
-  const targets = [];
-  for (const d of claimed) {
-    const channel = await store.getChannel(db, d.chat_id);
-    if (channel) {
-      targets.push({ chatId: d.chat_id, title: channel.title });
-    } else {
-      await store.upsertDelivery(db, {
-        broadcastId,
-        chatId: d.chat_id,
-        title: d.channel_title,
-        status: 'skipped',
-        copied: 0,
-        error: 'channel was removed from the bot',
-        now: deps.now(),
-      });
+  try {
+    const targets = [];
+    for (const d of claimed) {
+      const channel = await store.getChannel(db, d.chat_id);
+      if (channel) {
+        targets.push({ chatId: d.chat_id, title: channel.title });
+      } else {
+        await store.upsertDelivery(db, {
+          broadcastId,
+          chatId: d.chat_id,
+          title: d.channel_title,
+          status: 'skipped',
+          copied: 0,
+          error: 'channel was removed from the bot',
+          now: deps.now(),
+        });
+      }
     }
+    await deliver(deps, broadcast, targets);
+  } finally {
+    await showReport(deps, broadcast);
   }
-  await deliver(deps, broadcast, targets);
-  await showReport(deps, broadcast);
   return { ok: true };
 }

@@ -278,3 +278,165 @@ test('"message is not modified" is not treated as an edit failure', async () => 
   await publishDraft(deps, { draftId, userId: BROADCASTER });
   assert.equal(deps.api.callsOf('sendMessage').length, 0);
 });
+
+const until = async (check) => {
+  for (let i = 0; i < 200; i++) {
+    if (await check()) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  throw new Error('condition not reached');
+};
+
+test('each channel result is stored as soon as that channel settles', async () => {
+  const { deps, draftId } = await setup();
+  let releaseB;
+  const bBlocked = new Promise((resolve) => (releaseB = resolve));
+  deps.api.on('copyMessages', async (p) => {
+    if (p.chat_id === B) await bBlocked;
+    return [{ message_id: 1 }];
+  });
+  const publishing = publishDraft(deps, { draftId, userId: BROADCASTER });
+  await until(async () =>
+    (await deps.db.all('SELECT * FROM deliveries')).some(
+      (d) => d.chat_id === A && d.status === 'sent',
+    ),
+  );
+  const b = (await deps.db.all('SELECT * FROM deliveries')).find((d) => d.chat_id === B);
+  assert.equal(b?.status, 'pending', 'unsettled channels are recorded as pending before fan-out');
+  releaseB();
+  await publishing;
+});
+
+test('the in-progress message offers Retry so an interrupted publish can be recovered', async () => {
+  const { deps, draftId } = await setup();
+  const { broadcastId } = await publishDraft(deps, { draftId, userId: BROADCASTER });
+  const progress = deps.api.callsOf('editMessageText')[0];
+  assert.match(progress.text, /Publishing/);
+  assert.deepEqual(progress.reply_markup.inline_keyboard, [
+    [{ text: '🔁 Retry failed', callback_data: `retry:${broadcastId}` }],
+  ]);
+});
+
+test('a storage error for one channel still finishes the publish and shows the report', async () => {
+  const { deps, draftId } = await setup();
+  const run = deps.db.run.bind(deps.db);
+  deps.db.run = async (query, params) => {
+    if (query.includes('INSERT INTO deliveries') && params[':c'] === B && params[':s'] === 'sent') {
+      throw new Error('database is locked');
+    }
+    return run(query, params);
+  };
+  const result = await publishDraft(deps, { draftId, userId: BROADCASTER });
+  assert.equal(result.ok, true);
+  assert.equal((await store.getDraft(deps.db, draftId)).status, 'published');
+  const final = deps.api.callsOf('editMessageText').at(-1);
+  assert.match(final.text, /Sent to 1 of 2 channels/);
+  assert.match(final.text, /⏳ Chan B: sending…/);
+  assert.equal(final.reply_markup.inline_keyboard.length, 1, 'unfinished channels keep Retry');
+});
+
+test('retry recovers deliveries left pending or retrying by an interrupted run, once they are stale', async () => {
+  const deps = makeDeps();
+  await store.upsertChannel(deps.db, {
+    chatId: A,
+    title: 'Chan A',
+    username: null,
+    addedBy: OWNER,
+    now: NOW,
+  });
+  await store.upsertChannel(deps.db, {
+    chatId: B,
+    title: 'Chan B',
+    username: null,
+    addedBy: OWNER,
+    now: NOW,
+  });
+  const broadcastId = await store.createBroadcast(deps.db, {
+    draftId: 1,
+    userId: BROADCASTER,
+    chatId: BROADCASTER,
+    messageIds: [10],
+    controlMessageId: 77,
+    now: NOW,
+  });
+  const row = (chatId, title, status, at) =>
+    store.upsertDelivery(deps.db, {
+      broadcastId,
+      chatId,
+      title,
+      status,
+      copied: 0,
+      error: null,
+      now: at,
+    });
+  await row(A, 'Chan A', 'pending', NOW - 10);
+  await row(B, 'Chan B', 'retrying:x', NOW - 10);
+  assert.deepEqual(await retryFailed(deps, { broadcastId, userId: BROADCASTER }), {
+    ok: false,
+    reason: 'nothing_to_retry',
+  });
+  assert.equal(
+    deps.api.callsOf('copyMessages').length,
+    0,
+    'a run that may still be going is left alone',
+  );
+
+  await row(A, 'Chan A', 'pending', NOW - 600);
+  await row(B, 'Chan B', 'retrying:x', NOW - 600);
+  assert.equal((await retryFailed(deps, { broadcastId, userId: BROADCASTER })).ok, true);
+  assert.deepEqual(
+    deps.api
+      .callsOf('copyMessages')
+      .map((c) => c.chat_id)
+      .sort((x, y) => x - y),
+    [B, A],
+  );
+  assert.deepEqual(
+    (await store.listDeliveries(deps.db, broadcastId)).map((d) => d.status),
+    ['sent', 'sent'],
+  );
+});
+
+test('overlapping Retry taps never send to the same channel twice', async () => {
+  const { deps, draftId } = await setup();
+  deps.api.fail('copyMessages', 403, 'Forbidden');
+  const { broadcastId } = await publishDraft(deps, { draftId, userId: BROADCASTER });
+  deps.api.reset();
+
+  let releaseB;
+  const bBlocked = new Promise((resolve) => (releaseB = resolve));
+  deps.api.on('copyMessages', async (p, n) => {
+    if (p.chat_id === A && n === 0) throw new FakeBotApiError('copyMessages', 403, 'Forbidden');
+    if (p.chat_id === B) await bBlocked;
+    return [{ message_id: 1 }];
+  });
+  const first = retryFailed(deps, { broadcastId, userId: BROADCASTER });
+  const sendsTo = (chatId) => deps.api.callsOf('copyMessages').filter((c) => c.chat_id === chatId);
+  let second;
+  try {
+    // Wait until the first retry has tried A and recorded it as failed again,
+    // while B is still in flight; then tap Retry again.
+    await until(
+      async () =>
+        sendsTo(A).length > 0 &&
+        (await store.listDeliveries(deps.db, broadcastId)).some(
+          (d) => d.chat_id === A && d.status === 'failed',
+        ),
+    );
+    let secondDone = false;
+    const secondRun = retryFailed(deps, { broadcastId, userId: BROADCASTER }).then((r) => {
+      secondDone = true;
+      return r;
+    });
+    // The second retry either finishes, or wrongly sends to B (and blocks there).
+    await until(() => secondDone || sendsTo(B).length > 1);
+    releaseB();
+    [, second] = await Promise.all([first, secondRun]);
+  } finally {
+    releaseB();
+  }
+  assert.equal(second.ok, true);
+  const sends = deps.api.callsOf('copyMessages');
+  assert.equal(sends.filter((c) => c.chat_id === B).length, 1);
+  assert.equal(sends.filter((c) => c.chat_id === A).length, 2);
+});
