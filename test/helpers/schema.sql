@@ -19,6 +19,7 @@ CREATE TABLE channels (
   title TEXT NOT NULL,
   username TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
+  chat_type TEXT NOT NULL DEFAULT 'channel',
   added_by INTEGER NOT NULL,
   created_at INTEGER NOT NULL
 );
@@ -38,6 +39,12 @@ CREATE TABLE draft_messages (
   draft_id INTEGER NOT NULL,
   message_id INTEGER NOT NULL,
   PRIMARY KEY (draft_id, message_id)
+);
+
+CREATE TABLE draft_exclusions (
+  draft_id INTEGER NOT NULL,
+  chat_id INTEGER NOT NULL,
+  PRIMARY KEY (draft_id, chat_id)
 );
 
 CREATE TABLE broadcasts (

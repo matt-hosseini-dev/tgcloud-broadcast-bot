@@ -8,7 +8,13 @@ import { createTestDb } from './helpers/sqlite-db.js';
 // them, not only on names.
 
 const sqlDefault = (v) =>
-  v === undefined ? null : typeof v === 'boolean' ? String(Number(v)) : String(v);
+  typeof v === 'string'
+    ? `'${v}'`
+    : v === undefined
+      ? null
+      : typeof v === 'boolean'
+        ? String(Number(v))
+        : String(v);
 
 function describeSql(sqlite) {
   const tables = sqlite

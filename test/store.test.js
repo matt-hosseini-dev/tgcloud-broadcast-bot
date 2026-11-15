@@ -247,3 +247,45 @@ test('pending actions: set, take within max age once, clear', async () => {
     false,
   );
 });
+
+test('targets store their chat type, defaulting to channel', async () => {
+  const db = createTestDb();
+  await store.upsertTarget(db, { chatId: -1001, title: 'C', username: null, addedBy: 1, now: NOW });
+  await store.upsertTarget(db, {
+    chatId: -5,
+    chatType: 'supergroup',
+    title: 'G',
+    username: null,
+    addedBy: 1,
+    now: NOW,
+  });
+  await store.upsertTarget(db, {
+    chatId: 77,
+    chatType: 'private',
+    title: 'Ann',
+    username: 'ann',
+    addedBy: 1,
+    now: NOW,
+  });
+  assert.equal((await store.getTarget(db, -1001)).chat_type, 'channel');
+  assert.equal((await store.getTarget(db, -5)).chat_type, 'supergroup');
+  assert.equal((await store.getTarget(db, 77)).chat_type, 'private');
+});
+
+test('draft exclusions: toggle one, include all, exclude all', async () => {
+  const db = createTestDb();
+  assert.deepEqual(await store.listExcluded(db, 1), []);
+  await store.excludeFromDraft(db, 1, -1001);
+  await store.excludeFromDraft(db, 1, -1001);
+  await store.excludeFromDraft(db, 1, -5);
+  await store.excludeFromDraft(db, 2, -5);
+  assert.deepEqual(
+    (await store.listExcluded(db, 1)).sort((a, b) => a - b),
+    [-1001, -5],
+  );
+  await store.includeInDraft(db, 1, -5);
+  assert.deepEqual(await store.listExcluded(db, 1), [-1001]);
+  await store.clearExcluded(db, 1);
+  assert.deepEqual(await store.listExcluded(db, 1), []);
+  assert.deepEqual(await store.listExcluded(db, 2), [-5]);
+});

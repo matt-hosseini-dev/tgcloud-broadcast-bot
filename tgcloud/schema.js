@@ -25,12 +25,16 @@ export const broadcasters = table('broadcasters', {
   createdAt: integer('created_at').notNull(),
 });
 
-/** Channels a post is copied to. */
+/**
+ * Targets a post is copied to: channels, groups and users. (The table predates
+ * groups and users, hence its name.) chat_type: channel | group | supergroup | private
+ */
 export const channels = table('channels', {
   chatId: integer('chat_id').primaryKey(),
   title: text('title').notNull(),
   username: text('username'),
   enabled: boolean('enabled').notNull().default(true),
+  chatType: text('chat_type').notNull().default('channel'),
   addedBy: integer('added_by').notNull(),
   createdAt: integer('created_at').notNull(),
 });
@@ -61,6 +65,18 @@ export const draftMessages = table(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.draftId, t.messageId] }),
+  }),
+);
+
+/** Targets unticked in a draft's Publish checklist (all others are selected). */
+export const draftExclusions = table(
+  'draft_exclusions',
+  {
+    draftId: integer('draft_id').notNull(),
+    chatId: integer('chat_id').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.draftId, t.chatId] }),
   }),
 );
 

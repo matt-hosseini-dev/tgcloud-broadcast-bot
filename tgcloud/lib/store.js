@@ -58,15 +58,26 @@ export function listTargets(db, { enabledOnly = false } = {}) {
   );
 }
 
-/** Adds a channel or refreshes its title/username and re-enables it. @returns true if new. */
-export async function upsertTarget(db, { chatId, title, username, addedBy, now }) {
+/** Adds a target or refreshes its title/username/type and re-enables it. @returns true if new. */
+export async function upsertTarget(
+  db,
+  { chatId, chatType = 'channel', title, username, addedBy, now },
+) {
   const existed = await getTarget(db, chatId);
   await db.run(
-    `INSERT INTO channels (chat_id, title, username, enabled, added_by, created_at)
-     VALUES (:id, :title, :username, 1, :by, :now)
+    `INSERT INTO channels (chat_id, chat_type, title, username, enabled, added_by, created_at)
+     VALUES (:id, :type, :title, :username, 1, :by, :now)
      ON CONFLICT(chat_id) DO UPDATE SET
-       title = excluded.title, username = excluded.username, enabled = 1`,
-    { ':id': chatId, ':title': title, ':username': username ?? null, ':by': addedBy, ':now': now },
+       chat_type = excluded.chat_type, title = excluded.title,
+       username = excluded.username, enabled = 1`,
+    {
+      ':id': chatId,
+      ':type': chatType,
+      ':title': title,
+      ':username': username ?? null,
+      ':by': addedBy,
+      ':now': now,
+    },
   );
   return !existed;
 }
@@ -173,6 +184,34 @@ export async function setDraftStatus(db, { draftId, status, now }) {
     ':now': now,
     ':id': draftId,
   });
+}
+
+// ---- publish checklist (targets unticked per draft) ----
+
+export async function excludeFromDraft(db, draftId, chatId) {
+  await db.run(
+    'INSERT INTO draft_exclusions (draft_id, chat_id) VALUES (:d, :c) ON CONFLICT DO NOTHING',
+    { ':d': draftId, ':c': chatId },
+  );
+}
+
+export async function includeInDraft(db, draftId, chatId) {
+  await db.run('DELETE FROM draft_exclusions WHERE draft_id = :d AND chat_id = :c', {
+    ':d': draftId,
+    ':c': chatId,
+  });
+}
+
+export async function clearExcluded(db, draftId) {
+  await db.run('DELETE FROM draft_exclusions WHERE draft_id = :d', { ':d': draftId });
+}
+
+/** @returns {Promise<number[]>} */
+export async function listExcluded(db, draftId) {
+  const rows = await db.all('SELECT chat_id FROM draft_exclusions WHERE draft_id = :d', {
+    ':d': draftId,
+  });
+  return rows.map((r) => r.chat_id);
 }
 
 // ---- broadcasts and deliveries ----
