@@ -72,3 +72,31 @@ export function renderReport({ broadcastId, total, deliveries }) {
     },
   };
 }
+
+const BROADCASTER_HELP = [
+  '📣 Send me a post: text, photo, video, document or an album. Send several',
+  'messages to publish them together. Then press ✅ Publish to copy it to every',
+  'channel, or ✖️ Cancel to discard it.',
+  '',
+  'After publishing you get a report per channel, with 🔁 Retry failed if any',
+  'channel could not be reached.',
+  '',
+  '/cancel discards the current draft.',
+];
+
+const OWNER_HELP = [
+  '',
+  'Owner commands:',
+  '/channels list channels (with remove buttons)',
+  '/addchannel <@username or id> add a channel the bot can post in',
+  '/broadcasters list broadcasters (with remove buttons)',
+  '/addbroadcaster <user id> allow someone to publish',
+  '/addbroadcaster then forward a message from them, if you do not know the id',
+  '',
+  'Making the bot an admin of a channel (with "Post messages") adds it automatically.',
+];
+
+/** @param {'owner' | 'broadcaster'} role */
+export function helpText(role) {
+  return [...BROADCASTER_HELP, ...(role === 'owner' ? OWNER_HELP : [])].join('\n');
+}

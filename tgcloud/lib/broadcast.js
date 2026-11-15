@@ -100,10 +100,11 @@ async function showReport(deps, broadcast) {
 
 /**
  * Publish button. Claims the draft (so a double tap publishes once), copies it
- * to every enabled channel, and reports.
+ * to every enabled channel, and reports. `onStarted` runs right after the claim,
+ * before the slow fan-out (the router uses it to answer the callback query).
  * @returns {Promise<{ ok: true, broadcastId: number } | { ok: false, reason: 'no_channels' | 'not_open' | 'empty' }>}
  */
-export async function publishDraft(deps, { draftId, userId }) {
+export async function publishDraft(deps, { draftId, userId, onStarted }) {
   const { db } = deps;
   const channels = await store.listChannels(db, { enabledOnly: true });
   if (channels.length === 0) return { ok: false, reason: 'no_channels' };
@@ -112,6 +113,7 @@ export async function publishDraft(deps, { draftId, userId }) {
   if (!draft || !(await store.claimDraft(db, { draftId, userId, now: deps.now() }))) {
     return { ok: false, reason: 'not_open' };
   }
+  await onStarted?.();
   const messageIds = await store.listDraftMessageIds(db, draftId);
   if (messageIds.length === 0) {
     await store.setDraftStatus(db, { draftId, status: 'cancelled', now: deps.now() });
@@ -149,7 +151,7 @@ export async function publishDraft(deps, { draftId, userId }) {
  * removed from the bot since then are marked skipped.
  * @returns {Promise<{ ok: true } | { ok: false, reason: 'not_found' | 'not_allowed' | 'nothing_to_retry' }>}
  */
-export async function retryFailed(deps, { broadcastId, userId }) {
+export async function retryFailed(deps, { broadcastId, userId, onStarted }) {
   const { db } = deps;
   const broadcast = await store.getBroadcast(db, broadcastId);
   if (!broadcast) return { ok: false, reason: 'not_found' };
@@ -158,6 +160,7 @@ export async function retryFailed(deps, { broadcastId, userId }) {
   }
   const claimed = await store.claimFailedDeliveries(db, broadcastId, deps.now());
   if (claimed.length === 0) return { ok: false, reason: 'nothing_to_retry' };
+  await onStarted?.();
 
   const targets = [];
   for (const d of claimed) {
