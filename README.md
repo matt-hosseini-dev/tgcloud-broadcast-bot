@@ -1,5 +1,10 @@
 # tgcloud-broadcast-bot
 
+[![CI](https://github.com/matt-hosseini-dev/tgcloud-broadcast-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/matt-hosseini-dev/tgcloud-broadcast-bot/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node.js 22.15+](https://img.shields.io/badge/node-%E2%89%A522.15-brightgreen)](https://nodejs.org)
+[![Telegram Serverless](https://img.shields.io/badge/runs%20on-Telegram%20Serverless-26A5E4?logo=telegram)](https://core.telegram.org/bots/serverless)
+
 Send one post to many Telegram channels, groups and users at once, and see what
 happened in each. Runs on [Telegram Serverless](https://core.telegram.org/bots/serverless):
 no server to host.
@@ -69,4 +74,4 @@ Owners can do everything. Broadcasters can only post. Everyone else is ignored.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). If this bot saves you time, a ⭐ helps others find it.
