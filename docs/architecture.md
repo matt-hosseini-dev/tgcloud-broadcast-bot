@@ -55,6 +55,11 @@ sender's open draft.
 insert wins; only that invocation sends the control message with **Publish** and
 **Cancel**. If sending it fails, the draft is closed so the next message starts over.
 
+The message itself is inserted with `INSERT … SELECT … WHERE EXISTS (draft is open)`.
+If Publish claimed the draft in between, the insert does nothing and the message goes
+into a fresh draft instead of being lost. An open draft with no new message for an
+hour is cancelled (its control message says so) when the next message arrives.
+
 ### Publishing
 
 1. **Claim.** `UPDATE drafts SET status = 'publishing', open_key = NULL WHERE id = ? AND
@@ -62,9 +67,11 @@ user_id = ? AND status = 'open'`. If no row changed, someone already published o
    cancelled, so a double tap does nothing.
 2. **Answer the button** right away. The fan-out can take seconds and callback queries
    expire.
-3. **Fan out.** For each enabled channel, concurrently (`Promise.allSettled`):
+3. **Fan out.** Every channel gets a `pending` delivery row first, and the control
+   message shows "Publishing…" with a **Retry failed** button for recovery. Then, for
+   each enabled channel, concurrently (`Promise.allSettled`):
    `copyMessages({ chat_id, from_chat_id, message_ids })` with ids ascending, in chunks
-   of 100.
+   of 100. Each result is stored as soon as that channel settles.
 4. **Classify** each channel as:
    - **sent**: every message was copied.
    - **partial**: fewer copies than requested. Telegram silently skips messages it
@@ -75,13 +82,18 @@ user_id = ? AND status = 'open'`. If no row changed, someone already published o
    `setTimeout`, it is reported instead.
 
 5. **Report.** The control message is edited into the per-channel report. It gets
-   **Retry failed** if anything failed. If the edit fails, a new message is sent.
+   **Retry failed** if anything failed or never finished. If the edit fails, a new
+   message is sent. The report runs in a `finally`, so an error mid-way still produces
+   one.
 
 ### Retry failed
 
-`UPDATE deliveries SET status = 'retrying' WHERE broadcast_id = ? AND status = 'failed'`
-claims the failed rows. Only the invocation that changed rows proceeds, so a double tap
-retries once. Channels removed since then are marked **skipped**.
+Each retry run claims rows by setting their status to its own token
+(`retrying:<random>`) and then selects exactly those rows. Claimable rows are `failed`
+ones, plus `pending` or `retrying:*` rows untouched for two minutes, which were left
+behind by an interrupted run. Overlapping taps therefore never send to the same channel
+twice, and a crashed publish can be finished later. Channels removed since then are
+marked **skipped**.
 
 ### Channels joining
 

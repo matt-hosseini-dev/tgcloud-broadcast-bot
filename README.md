@@ -22,12 +22,15 @@ there again and nowhere else.
 
 - **Drafts with Publish / Cancel.** Everything you send goes into a draft until you
   publish or cancel it. A 10-photo album gets one control message, not ten.
+  A draft left untouched for an hour is discarded on your next message, which starts a
+  new one.
 - **One call per channel.** Uses `copyMessages`, so formatting, captions and albums
   survive, and posts appear without a "Forwarded from" header.
 - **Per-channel report** with the Bot API's own error text, and a retry button that
   only targets failed channels.
 - **Safe against double taps and redelivery.** Publish and Retry claim their work
-  atomically in the database, and every update is processed once.
+  atomically in the database, and every update is processed once. If a publish is interrupted,
+  **Retry failed** picks up the channels it did not finish.
 - **Roles.** Owners (set per deployment) manage channels and broadcasters. Broadcasters
   publish. Everyone else is ignored.
 - **Channels register themselves** when an owner makes the bot a channel admin.
@@ -85,7 +88,7 @@ an environment named `production` and add two **secrets** to it:
 | `OWNER_IDS`     | The same comma-separated ids as in `.env` |
 
 The workflow runs the checks, generates the config, then runs `tgcloud fetch`, `push`,
-`migrate --safe --yes` and `webhook sync`. Without `TGCLOUD_TOKEN` it skips itself, so
+`migrate --safe` (safe changes only; `--safe` and `--yes` cannot be combined) and `webhook sync`. Without `TGCLOUD_TOKEN` it skips itself, so
 forks do not fail.
 
 ## Privacy
