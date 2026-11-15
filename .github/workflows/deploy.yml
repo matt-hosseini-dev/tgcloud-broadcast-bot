@@ -1,0 +1,79 @@
+name: Deploy
+
+# Deploys main to Telegram Serverless. Needs, in the `production` environment:
+#   secret TGCLOUD_TOKEN  CLI access token (BotFather -> your bot -> Serverless -> CLI Access)
+#   secret OWNER_IDS      comma-separated Telegram user ids of the owners
+# Without TGCLOUD_TOKEN (e.g. in forks) the job skips itself.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to tgcloud
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+      OWNER_IDS: ${{ secrets.OWNER_IDS }}
+      TGCLOUD_NO_PAGER: '1'
+    steps:
+      - name: Check deploy configuration
+        id: gate
+        run: |
+          if [ -z "$TGCLOUD_TOKEN" ]; then
+            echo "::notice::TGCLOUD_TOKEN is not set; skipping deploy."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$OWNER_IDS" ]; then
+            echo "::error::OWNER_IDS secret is not set."
+            exit 1
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+
+      - if: steps.gate.outputs.enabled == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - if: steps.gate.outputs.enabled == 'true'
+        run: npm ci
+
+      - name: Lint, format check and tests
+        if: steps.gate.outputs.enabled == 'true'
+        run: npm run check
+
+      - name: Generate tgcloud/lib/config.js
+        if: steps.gate.outputs.enabled == 'true'
+        run: npm run config
+
+      # A fresh checkout has no .tgcloud/ snapshot; fetch records the cloud's
+      # current revision so push stays a conditional (non-forced) deploy.
+      - name: Sync snapshot from the cloud
+        if: steps.gate.outputs.enabled == 'true'
+        run: mkdir -p .tgcloud && npx tgcloud fetch
+
+      - name: Push modules
+        if: steps.gate.outputs.enabled == 'true'
+        run: npx tgcloud push
+
+      - name: Apply safe schema changes
+        if: steps.gate.outputs.enabled == 'true'
+        run: npx tgcloud migrate --safe --yes
+
+      - name: Sync webhook with handlers
+        if: steps.gate.outputs.enabled == 'true'
+        run: npx tgcloud webhook sync
