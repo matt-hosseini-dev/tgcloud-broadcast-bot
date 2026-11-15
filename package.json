@@ -9,6 +9,7 @@
     "node": ">=22.15"
   },
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "config": "node scripts/write-config.mjs",
     "deploy": "npm run config && tgcloud push",
     "migrate": "tgcloud migrate",

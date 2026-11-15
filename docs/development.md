@@ -68,6 +68,26 @@ Then, with two throwaway channels where the test bot is admin:
 2. Remove the bot's **Post messages** right in one channel and publish again. The
    report should show the failure and **Retry**. Restore the right and press it.
 
+## Continuous deployment with GitHub Actions
+
+`.github/workflows/deploy.yml` deploys every push to `main`. In your repository create
+an environment named `production` and add two **secrets** to it:
+
+| Secret          | Value                                                                  |
+| --------------- | ---------------------------------------------------------------------- |
+| `TGCLOUD_TOKEN` | The CLI access token (@BotFather → your bot → Serverless → CLI Access) |
+| `OWNER_IDS`     | The same comma-separated ids as in `.env`                              |
+
+The workflow runs the checks, generates the config, then runs `tgcloud fetch`, `push`,
+`migrate --safe` (safe changes only; `--safe` and `--yes` cannot be combined) and
+`webhook sync`. Without `TGCLOUD_TOKEN` it skips itself, so forks do not fail.
+
+## Owner ids
+
+Owner ids live in `.env` locally and in a GitHub secret in CI. They are compiled into
+`tgcloud/lib/config.js` (git-ignored), because Telegram Serverless has no environment
+variables. They are never committed.
+
 ## Conventions
 
 - Plain JavaScript (ES modules) with JSDoc, no build step.
