@@ -72,7 +72,7 @@ jobs:
 
       - name: Apply safe schema changes
         if: steps.gate.outputs.enabled == 'true'
-        run: npx tgcloud migrate --safe --yes
+        run: npx tgcloud migrate --safe
 
       - name: Sync webhook with handlers
         if: steps.gate.outputs.enabled == 'true'
