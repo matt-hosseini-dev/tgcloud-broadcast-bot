@@ -152,3 +152,16 @@ The platform manages the bot's webhook for you, derived from your deployed
 `handlers/*`, and refreshes it on `push`. If it ever drifts — e.g. someone called
 `setWebhook` with the raw bot token — `npx tgcloud webhook` shows the mismatch and
 `npx tgcloud webhook sync` repairs it.
+
+## This project
+
+A broadcast bot: drafts in private chat → Publish → `copyMessages` to every channel →
+per-channel report with Retry failed. See [docs/architecture.md](docs/architecture.md).
+
+- Only `tgcloud/lib/container.js` imports `sdk`; every other `lib/` module takes
+  `{ api, db, config, now, sleep }` as an argument. Keep it that way: it is how the
+  tests run in plain Node (`npm test`, see [docs/development.md](docs/development.md)).
+- `tgcloud/lib/config.js` is generated from `OWNER_IDS` (`npm run config`) and
+  git-ignored. Never commit it, `.env`, tokens or real Telegram ids.
+- All SQL is in `tgcloud/lib/store.js`. Change `tgcloud/schema.js` and
+  `test/helpers/schema.sql` together.
