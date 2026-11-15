@@ -1,14 +1,20 @@
-// Texts and inline keyboards shown to users. Plain text (no parse_mode), so
-// channel titles and Bot API error descriptions never need escaping.
+// Texts and keyboards shown to users. Kept short. Plain text (no parse_mode),
+// so titles and Bot API error descriptions never need escaping.
 
-export const DRAFT_STARTED =
-  '📝 New post started. Everything you send now is added to it (albums stay grouped).\n' +
-  'Press Publish to send it to all channels, or Cancel to discard it.';
+/** Cuts to n code points (never splits an emoji). */
+export function clip(s, n) {
+  const chars = [...s];
+  return chars.length > n ? `${chars.slice(0, n - 1).join('')}…` : s;
+}
 
-export const DRAFT_CANCELLED = '🗑 Draft cancelled. Nothing was published.';
+export const TYPE_ICON = { channel: '📢', group: '👥', supergroup: '👥', private: '👤' };
+const icon = (type) => TYPE_ICON[type] ?? '📢';
 
-export const DRAFT_EXPIRED =
-  '⌛ This draft expired after an hour without new messages and was discarded. Nothing was published.';
+// ---- drafts ----
+
+export const DRAFT_STARTED = '📝 Draft started. Add more or tap Publish.';
+export const DRAFT_CANCELLED = '🗑 Cancelled.';
+export const DRAFT_EXPIRED = '⌛ Draft expired (idle 1h).';
 
 /** Publish / Cancel buttons for a draft's control message. */
 export function draftKeyboard(draftId) {
@@ -22,29 +28,47 @@ export function draftKeyboard(draftId) {
   };
 }
 
-export const PUBLISHING = '⏳ Publishing…';
+/** Publish checklist: every target with a tick, All/None, then Send. */
+export function checklistView({ draftId, targets, excluded }) {
+  const selected = targets.filter((t) => !excluded.has(t.chat_id)).length;
+  const rows = targets.map((t) => [
+    {
+      text: `${excluded.has(t.chat_id) ? '⬜️' : '✅'} ${icon(t.chat_type)} ${clip(t.title, 40)}`,
+      callback_data: `tg:${draftId}:${t.chat_id}`,
+    },
+  ]);
+  const anyExcluded = excluded.size > 0 && targets.some((t) => excluded.has(t.chat_id));
+  rows.push([{ text: anyExcluded ? '☑️ All' : '⬜️ None', callback_data: `all:${draftId}` }]);
+  rows.push([
+    { text: `📤 Send (${selected})`, callback_data: `send:${draftId}` },
+    { text: '✖️ Cancel', callback_data: `can:${draftId}` },
+  ]);
+  return {
+    text: `Send to ${selected}/${targets.length}:`,
+    reply_markup: { inline_keyboard: rows },
+  };
+}
+
+// ---- publishing and report ----
+
+export const PUBLISHING = '⏳ Sending…';
 export const RETRYING = '⏳ Retrying…';
-const IN_PROGRESS_HINT =
-  'If this message has not turned into a report after a few minutes, press Retry failed.';
 
 const retryKeyboard = (broadcastId) => [
-  [{ text: '🔁 Retry failed', callback_data: `retry:${broadcastId}` }],
+  [{ text: '🔁 Retry', callback_data: `retry:${broadcastId}` }],
 ];
 
 /** Shown while sending. Its Retry button recovers a run that was interrupted. */
 export function progressView(broadcastId, text) {
   return {
-    text: `${text}\n\n${IN_PROGRESS_HINT}`,
+    text: `${text}\nStuck? Tap Retry.`,
     reply_markup: { inline_keyboard: retryKeyboard(broadcastId) },
   };
 }
 
 const MAX_TEXT = 4096;
-const MAX_ERROR = 200;
-
+const MAX_ERROR = 120;
 const FINAL = new Set(['sent', 'partial', 'skipped']);
-
-const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 function deliveryLine(d, total) {
   const title = d.channel_title;
@@ -52,38 +76,34 @@ function deliveryLine(d, total) {
     case 'sent':
       return `✅ ${title}`;
     case 'partial':
-      return `⚠️ ${title}: ${d.copied} of ${total} messages copied (some message types cannot be copied)`;
+      return `⚠️ ${title}: ${d.copied}/${total} copied`;
     case 'skipped':
       return `⏭ ${title}: ${clip(d.error ?? 'skipped', MAX_ERROR)}`;
-    case 'pending':
-      return `⏳ ${title}: sending…`;
-    default:
-      if (d.status.startsWith('retrying')) return `⏳ ${title}: retrying…`;
+    case 'failed':
       return `❌ ${title}: ${clip(d.error ?? 'failed', MAX_ERROR)}`;
+    default: // pending, retrying:<token>
+      return `⏳ ${title}`;
   }
 }
 
 /**
- * The per-channel report that replaces the control message after publishing.
+ * The per-target report that replaces the control message after publishing.
  * @param {{ broadcastId: number, total: number, deliveries: Array<{ channel_title: string, status: string, copied: number, error: string | null }> }} r
- * @returns {{ text: string, reply_markup: { inline_keyboard: object[][] } }}
  */
 export function renderReport({ broadcastId, total, deliveries }) {
   const delivered = deliveries.filter((d) => d.status === 'sent' || d.status === 'partial').length;
-  const header = `📣 Sent to ${delivered} of ${deliveries.length} channels.`;
+  const header = `📣 Sent ${delivered}/${deliveries.length}`;
   const lines = [header, ''];
   let length = header.length + 1;
   for (const [i, d] of deliveries.entries()) {
     const line = deliveryLine(d, total);
-    const rest = deliveries.length - i;
     if (length + line.length + 1 > MAX_TEXT - 40) {
-      lines.push(`…and ${rest} more`);
+      lines.push(`…and ${deliveries.length - i} more`);
       break;
     }
     lines.push(line);
     length += line.length + 1;
   }
-  // failed, or never finished (pending / retrying after an error): retry can pick them up.
   const unfinished = deliveries.some((d) => !FINAL.has(d.status));
   return {
     text: lines.join('\n'),
@@ -91,30 +111,84 @@ export function renderReport({ broadcastId, total, deliveries }) {
   };
 }
 
-const BROADCASTER_HELP = [
-  '📣 Send me a post: text, photo, video, document or an album. Send several',
-  'messages to publish them together. Then press ✅ Publish to copy it to every',
-  'channel, or ✖️ Cancel to discard it.',
-  '',
-  'After publishing you get a report per channel, with 🔁 Retry failed if any',
-  'channel could not be reached.',
-  '',
-  '/cancel discards the current draft.',
-];
+// ---- owner keyboard ----
 
-const OWNER_HELP = [
-  '',
-  'Owner commands:',
-  '/channels list channels (with remove buttons)',
-  '/addchannel <@username or id> add a channel the bot can post in',
-  '/broadcasters list broadcasters (with remove buttons)',
-  '/addbroadcaster <user id> allow someone to publish',
-  '/addbroadcaster then forward a message from them, if you do not know the id',
-  '',
-  'Making the bot an admin of a channel (with "Post messages") adds it automatically.',
-];
+export const TARGETS_BUTTON = '📋 Targets';
+
+/** Picker request ids, echoed back in users_shared / chat_shared. */
+export const REQUEST = { users: 1, group: 2, channel: 3 };
+
+// ChatAdministratorRights: the non-optional fields must all be present.
+const POST_RIGHTS = {
+  is_anonymous: false,
+  can_manage_chat: false,
+  can_delete_messages: false,
+  can_manage_video_chats: false,
+  can_restrict_members: false,
+  can_promote_members: false,
+  can_change_info: false,
+  can_invite_users: false,
+  can_post_stories: false,
+  can_edit_stories: false,
+  can_delete_stories: false,
+  can_send_welcome_messages: false,
+  can_post_messages: true,
+};
+
+/** Persistent reply keyboard for owners: native pickers to add targets. */
+export function ownerKeyboard() {
+  return {
+    keyboard: [
+      [
+        {
+          text: '👤 User',
+          request_users: {
+            request_id: REQUEST.users,
+            user_is_bot: false,
+            max_quantity: 10,
+            request_name: true,
+            request_username: true,
+          },
+        },
+        {
+          text: '👥 Group',
+          request_chat: {
+            request_id: REQUEST.group,
+            chat_is_channel: false,
+            bot_is_member: true,
+            request_title: true,
+            request_username: true,
+          },
+        },
+        {
+          text: '📢 Channel',
+          request_chat: {
+            request_id: REQUEST.channel,
+            chat_is_channel: true,
+            user_administrator_rights: POST_RIGHTS,
+            bot_administrator_rights: POST_RIGHTS,
+            request_title: true,
+            request_username: true,
+          },
+        },
+      ],
+      [{ text: TARGETS_BUTTON }],
+    ],
+    resize_keyboard: true,
+    is_persistent: true,
+    input_field_placeholder: 'Send a post…',
+  };
+}
+
+// ---- help ----
 
 /** @param {'owner' | 'broadcaster'} role */
 export function helpText(role) {
-  return [...BROADCASTER_HELP, ...(role === 'owner' ? OWNER_HELP : [])].join('\n');
+  const base = 'Send a post, then tap Publish.\n/cancel drops the draft.';
+  if (role !== 'owner') return base;
+  return (
+    `${base}\n\n` +
+    '👤 👥 📢 add targets · 📋 lists them\n' +
+    '/broadcasters · /addbroadcaster <id>'
+  );
 }

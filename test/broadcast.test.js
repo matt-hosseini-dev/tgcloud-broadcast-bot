@@ -66,7 +66,7 @@ test('publish edits the control message into a report without a Retry button whe
   const edits = deps.api.callsOf('editMessageText');
   const final = edits.at(-1);
   assert.equal(final.message_id, 1000);
-  assert.match(final.text, /Sent to 2 of 2 channels/);
+  assert.match(final.text, /Sent 2\/2/);
   assert.match(final.text, /✅ Chan A/);
   assert.deepEqual(final.reply_markup, { inline_keyboard: [] });
 });
@@ -89,10 +89,10 @@ test('only the draft author can publish it', async () => {
   assert.equal(deps.api.callsOf('copyMessages').length, 0);
 });
 
-test('publish without channels keeps the draft open', async () => {
+test('publish without targets keeps the draft open', async () => {
   const { deps, draftId } = await setup({ channels: [] });
   const result = await publishDraft(deps, { draftId, userId: BROADCASTER });
-  assert.deepEqual(result, { ok: false, reason: 'no_channels' });
+  assert.deepEqual(result, { ok: false, reason: 'no_targets' });
   assert.equal((await store.getDraft(deps.db, draftId)).status, 'open');
 });
 
@@ -110,10 +110,10 @@ test('mixed success and failure: report lists the error and offers Retry failed'
   });
   const result = await publishDraft(deps, { draftId, userId: BROADCASTER });
   const final = deps.api.callsOf('editMessageText').at(-1);
-  assert.match(final.text, /Sent to 1 of 2 channels/);
+  assert.match(final.text, /Sent 1\/2/);
   assert.match(final.text, /❌ Chan B: Forbidden: bot is not a member of the channel chat/);
   assert.deepEqual(final.reply_markup.inline_keyboard, [
-    [{ text: '🔁 Retry failed', callback_data: `retry:${result.broadcastId}` }],
+    [{ text: '🔁 Retry', callback_data: `retry:${result.broadcastId}` }],
   ]);
 });
 
@@ -125,7 +125,7 @@ test('fewer copies than requested is reported as partial, not failed', async () 
   assert.equal(d.status, 'partial');
   assert.equal(d.copied, 2);
   const final = deps.api.callsOf('editMessageText').at(-1);
-  assert.match(final.text, /⚠️ Chan A: 2 of 3 messages copied/);
+  assert.match(final.text, /⚠️ Chan A: 2\/3 copied/);
   assert.deepEqual(final.reply_markup, { inline_keyboard: [] });
 });
 
@@ -210,7 +210,7 @@ test('Retry failed re-sends only to the failed channels and updates the report',
     [C, B],
   );
   const final = deps.api.callsOf('editMessageText').at(-1);
-  assert.match(final.text, /Sent to 3 of 3 channels/);
+  assert.match(final.text, /Sent 3\/3/);
   assert.deepEqual(final.reply_markup, { inline_keyboard: [] });
 });
 
@@ -243,7 +243,7 @@ test('retry skips channels removed since the broadcast', async () => {
     [A],
   );
   const final = deps.api.callsOf('editMessageText').at(-1);
-  assert.match(final.text, /⏭ Chan B: channel was removed from the bot/);
+  assert.match(final.text, /⏭ Chan B: removed/);
   assert.deepEqual(final.reply_markup, { inline_keyboard: [] });
 });
 
@@ -269,7 +269,7 @@ test('report falls back to a new message when the control message cannot be edit
   await publishDraft(deps, { draftId, userId: BROADCASTER });
   const sent = deps.api.callsOf('sendMessage');
   assert.equal(sent.length, 1);
-  assert.match(sent[0].text, /Sent to 2 of 2 channels/);
+  assert.match(sent[0].text, /Sent 2\/2/);
 });
 
 test('"message is not modified" is not treated as an edit failure', async () => {
@@ -311,9 +311,9 @@ test('the in-progress message offers Retry so an interrupted publish can be reco
   const { deps, draftId } = await setup();
   const { broadcastId } = await publishDraft(deps, { draftId, userId: BROADCASTER });
   const progress = deps.api.callsOf('editMessageText')[0];
-  assert.match(progress.text, /Publishing/);
+  assert.match(progress.text, /Sending/);
   assert.deepEqual(progress.reply_markup.inline_keyboard, [
-    [{ text: '🔁 Retry failed', callback_data: `retry:${broadcastId}` }],
+    [{ text: '🔁 Retry', callback_data: `retry:${broadcastId}` }],
   ]);
 });
 
@@ -330,8 +330,8 @@ test('a storage error for one channel still finishes the publish and shows the r
   assert.equal(result.ok, true);
   assert.equal((await store.getDraft(deps.db, draftId)).status, 'published');
   const final = deps.api.callsOf('editMessageText').at(-1);
-  assert.match(final.text, /Sent to 1 of 2 channels/);
-  assert.match(final.text, /⏳ Chan B: sending…/);
+  assert.match(final.text, /Sent 1\/2/);
+  assert.match(final.text, /⏳ Chan B$/m);
   assert.equal(final.reply_markup.inline_keyboard.length, 1, 'unfinished channels keep Retry');
 });
 
@@ -439,4 +439,58 @@ test('overlapping Retry taps never send to the same channel twice', async () => 
   const sends = deps.api.callsOf('copyMessages');
   assert.equal(sends.filter((c) => c.chat_id === B).length, 1);
   assert.equal(sends.filter((c) => c.chat_id === A).length, 2);
+});
+
+test('publish skips targets unticked in the checklist', async () => {
+  const { deps, draftId } = await setup({ channels: [A, B, C] });
+  await store.excludeFromDraft(deps.db, draftId, B);
+  const { broadcastId } = await publishDraft(deps, { draftId, userId: BROADCASTER });
+  assert.deepEqual(
+    deps.api
+      .callsOf('copyMessages')
+      .map((c) => c.chat_id)
+      .sort((x, y) => x - y),
+    [C, A],
+  );
+  assert.equal((await store.listDeliveries(deps.db, broadcastId)).length, 2);
+});
+
+test('publish with every target unticked keeps the draft open', async () => {
+  const { deps, draftId } = await setup();
+  await store.excludeFromDraft(deps.db, draftId, A);
+  await store.excludeFromDraft(deps.db, draftId, B);
+  assert.deepEqual(await publishDraft(deps, { draftId, userId: BROADCASTER }), {
+    ok: false,
+    reason: 'none_selected',
+  });
+  assert.equal((await store.getDraft(deps.db, draftId)).status, 'open');
+  assert.equal(deps.api.callsOf('copyMessages').length, 0);
+});
+
+test('publish copies to users and groups as well as channels', async () => {
+  const { deps, draftId } = await setup({ channels: [A] });
+  await store.upsertTarget(deps.db, {
+    chatId: 77,
+    chatType: 'private',
+    title: 'Ann',
+    username: null,
+    addedBy: OWNER,
+    now: NOW,
+  });
+  await store.upsertTarget(deps.db, {
+    chatId: -5,
+    chatType: 'supergroup',
+    title: 'Team',
+    username: null,
+    addedBy: OWNER,
+    now: NOW,
+  });
+  await publishDraft(deps, { draftId, userId: BROADCASTER });
+  assert.deepEqual(
+    deps.api
+      .callsOf('copyMessages')
+      .map((c) => c.chat_id)
+      .sort((x, y) => x - y),
+    [A, -5, 77],
+  );
 });

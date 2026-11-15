@@ -38,7 +38,7 @@ test('addBroadcasterById works when Telegram does not know the user yet', async 
 
 test('addBroadcasterById rejects non-numeric ids and owners', async () => {
   const deps = makeDeps();
-  assert.match((await addBroadcasterById(deps, { ref: '@ann', addedBy: OWNER })).error, /numeric/);
+  assert.match((await addBroadcasterById(deps, { ref: '@ann', addedBy: OWNER })).error, /Usage/);
   assert.match(
     (await addBroadcasterById(deps, { ref: String(OWNER), addedBy: OWNER })).error,
     /owner/,
@@ -77,7 +77,7 @@ test('addBroadcasterFromForward explains hidden senders, bots and channels', asy
   });
   assert.match(
     (await addBroadcasterFromForward(deps, { message: hidden, addedBy: OWNER })).error,
-    /hides/,
+    /hidden/,
   );
   const bot = privateMessage(OWNER, 31, {
     forward_origin: {
@@ -88,7 +88,7 @@ test('addBroadcasterFromForward explains hidden senders, bots and channels', asy
   });
   assert.match(
     (await addBroadcasterFromForward(deps, { message: bot, addedBy: OWNER })).error,
-    /bot/,
+    /Bots/,
   );
   const chan = privateMessage(OWNER, 32, {
     forward_origin: { type: 'channel', date: NOW, chat: { id: -1 } },

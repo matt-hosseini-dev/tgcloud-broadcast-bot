@@ -113,15 +113,18 @@ async function showReport(deps, broadcast) {
 }
 
 /**
- * Publish button. Claims the draft (so a double tap publishes once), copies it
- * to every enabled channel, and reports. `onStarted` runs right after the claim,
+ * Send button. Claims the draft (so a double tap publishes once), copies it
+ * to every enabled target not unticked in the checklist, and reports. `onStarted` runs right after the claim,
  * before the slow fan-out (the router uses it to answer the callback query).
- * @returns {Promise<{ ok: true, broadcastId: number } | { ok: false, reason: 'no_channels' | 'not_open' | 'empty' }>}
+ * @returns {Promise<{ ok: true, broadcastId: number } | { ok: false, reason: 'no_targets' | 'none_selected' | 'not_open' | 'empty' }>}
  */
 export async function publishDraft(deps, { draftId, userId, onStarted }) {
   const { db } = deps;
-  const channels = await store.listTargets(db, { enabledOnly: true });
-  if (channels.length === 0) return { ok: false, reason: 'no_channels' };
+  const all = await store.listTargets(db, { enabledOnly: true });
+  if (all.length === 0) return { ok: false, reason: 'no_targets' };
+  const excluded = new Set(await store.listExcluded(db, draftId));
+  const channels = all.filter((t) => !excluded.has(t.chat_id));
+  if (channels.length === 0) return { ok: false, reason: 'none_selected' };
 
   const draft = await store.getDraft(db, draftId);
   if (!draft || !(await store.claimDraft(db, { draftId, userId, now: deps.now() }))) {
@@ -202,7 +205,7 @@ export async function retryFailed(deps, { broadcastId, userId, onStarted }) {
           title: d.channel_title,
           status: 'skipped',
           copied: 0,
-          error: 'channel was removed from the bot',
+          error: 'removed',
           now: deps.now(),
         });
       }
