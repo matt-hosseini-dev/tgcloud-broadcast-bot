@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import globals from 'globals';
 
 export default [
-  { ignores: ['node_modules/', '.tgcloud/', '.superpowers/', 'tgcloud/lib/config.js'] },
+  { ignores: ['node_modules/', '.tgcloud/', 'tgcloud/lib/config.js'] },
   js.configs.recommended,
   {
     files: ['tgcloud/**/*.js'],

@@ -10,5 +10,4 @@ tgcloud/lib/config.js
 
 # Local tooling and private notes
 .claude/
-.superpowers/
 docs/plans/
