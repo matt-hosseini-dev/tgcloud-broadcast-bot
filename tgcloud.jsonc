@@ -3,5 +3,5 @@
   // "static": {
   //   "source": "dist"
   // },
-  "$schema": "./node_modules/@tgcloud/cli/schema/tgcloud.json"
+  "$schema": "./node_modules/@tgcloud/cli/schema/tgcloud.json",
 }

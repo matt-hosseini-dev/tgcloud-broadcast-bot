@@ -1,4 +1,4 @@
-import { table, integer, text } from 'sdk/db';
+// import { table, integer, text } from 'sdk/db';
 
 // Your database tables go here as named exports. Deploying this file registers the
 // schema; applying the changes (a migration) updates the database.

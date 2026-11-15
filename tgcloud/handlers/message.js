@@ -4,7 +4,7 @@
 
 import { api } from 'sdk';
 
-export default async function (message, ctx) {
+export default async function (message, _ctx) {
   // Echo the text back — replace with your own logic.
   await api.sendMessage({
     chat_id: message.chat.id,
