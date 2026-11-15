@@ -42,7 +42,7 @@ test('addChannel verifies the bot can post and saves the channel', async () => {
   assert.equal(r.created, true);
   assert.equal(deps.api.callsOf('getChat')[0].chat_id, '@news');
   assert.deepEqual(deps.api.callsOf('getChatMember')[0], { chat_id: -1001, user_id: BOT.id });
-  const saved = await store.getChannel(deps.db, -1001);
+  const saved = await store.getTarget(deps.db, -1001);
   assert.equal(saved.title, 'News');
   assert.equal(saved.username, 'news');
   assert.equal(saved.added_by, OWNER);
@@ -60,7 +60,7 @@ test('addChannel refuses when the bot cannot post', async () => {
   const r = await addChannel(deps, { ref: '@news', addedBy: OWNER });
   assert.equal(r.ok, false);
   assert.match(r.error, /Post messages/);
-  assert.equal(await store.getChannel(deps.db, -1001), null);
+  assert.equal(await store.getTarget(deps.db, -1001), null);
 });
 
 test('addChannel refuses a plain member, a group, an unknown chat and a bad reference', async () => {
@@ -75,20 +75,20 @@ test('addChannel refuses a plain member, a group, an unknown chat and a bad refe
   assert.match((await addChannel(deps, { ref: '@nope', addedBy: OWNER })).error, /chat not found/);
 
   assert.match((await addChannel(deps, { ref: '', addedBy: OWNER })).error, /Usage/);
-  assert.equal((await store.listChannels(deps.db)).length, 0);
+  assert.equal((await store.listTargets(deps.db)).length, 0);
 });
 
 test('channelsView lists channels with remove buttons', async () => {
   const deps = makeDeps();
   assert.match((await channelsView(deps)).text, /No channels yet/);
-  await store.upsertChannel(deps.db, {
+  await store.upsertTarget(deps.db, {
     chatId: -1001,
     title: 'News',
     username: 'news',
     addedBy: OWNER,
     now: NOW,
   });
-  await store.upsertChannel(deps.db, {
+  await store.upsertTarget(deps.db, {
     chatId: -1002,
     title: 'Blog',
     username: null,
@@ -106,7 +106,7 @@ test('channelsView lists channels with remove buttons', async () => {
 
 test('removeChannelById deletes once', async () => {
   const deps = makeDeps();
-  await store.upsertChannel(deps.db, {
+  await store.upsertTarget(deps.db, {
     chatId: -1001,
     title: 'News',
     username: null,
@@ -128,7 +128,7 @@ const memberUpdate = (fromId, newMember, chat = CHANNEL) => ({
 test('my_chat_member from an owner promoting the bot registers the channel and notifies', async () => {
   const deps = makeDeps();
   await handleMyChatMember(deps, memberUpdate(OWNER, adminMember()));
-  assert.equal((await store.getChannel(deps.db, -1001)).title, 'News');
+  assert.equal((await store.getTarget(deps.db, -1001)).title, 'News');
   const sent = deps.api.callsOf('sendMessage');
   assert.equal(sent[0].chat_id, OWNER);
   assert.match(sent[0].text, /News/);
@@ -144,14 +144,14 @@ test('my_chat_member from a non-owner is ignored silently', async () => {
   });
   await handleMyChatMember(deps, memberUpdate(BROADCASTER, adminMember()));
   await handleMyChatMember(deps, memberUpdate(777, adminMember()));
-  assert.equal((await store.listChannels(deps.db)).length, 0);
+  assert.equal((await store.listTargets(deps.db)).length, 0);
   assert.equal(deps.api.calls.length, 0);
 });
 
 test('my_chat_member without posting rights tells the owner what is missing', async () => {
   const deps = makeDeps();
   await handleMyChatMember(deps, memberUpdate(OWNER, adminMember({ can_post_messages: false })));
-  assert.equal((await store.listChannels(deps.db)).length, 0);
+  assert.equal((await store.listTargets(deps.db)).length, 0);
   assert.match(deps.api.callsOf('sendMessage')[0].text, /Post messages/);
 });
 
@@ -163,7 +163,7 @@ test('my_chat_member for groups, private chats and removals is ignored', async (
   );
   await handleMyChatMember(deps, memberUpdate(OWNER, { status: 'kicked', user: BOT }));
   await handleMyChatMember(deps, memberUpdate(OWNER, { status: 'left', user: BOT }));
-  assert.equal((await store.listChannels(deps.db)).length, 0);
+  assert.equal((await store.listTargets(deps.db)).length, 0);
   assert.equal(deps.api.calls.length, 0);
 });
 
@@ -173,5 +173,5 @@ test('a failed owner notification does not undo the registration', async () => {
     throw new FakeBotApiError('sendMessage', 403, 'Forbidden: bot was blocked by the user');
   });
   await handleMyChatMember(deps, memberUpdate(OWNER, adminMember()));
-  assert.ok(await store.getChannel(deps.db, -1001));
+  assert.ok(await store.getTarget(deps.db, -1001));
 });

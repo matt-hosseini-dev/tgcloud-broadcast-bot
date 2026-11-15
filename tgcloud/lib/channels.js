@@ -55,23 +55,23 @@ export async function addChannel(deps, { ref, addedBy }) {
   }
   if (!canPost(member)) return { ok: false, error: missingRightsText(chat.title, member) };
 
-  const created = await store.upsertChannel(db, {
+  const created = await store.upsertTarget(db, {
     chatId: chat.id,
     title: chat.title ?? String(chat.id),
     username: chat.username ?? null,
     addedBy,
     now: deps.now(),
   });
-  return { ok: true, created, channel: await store.getChannel(db, chat.id) };
+  return { ok: true, created, channel: await store.getTarget(db, chat.id) };
 }
 
 export function removeChannelById(deps, chatId) {
-  return store.removeChannel(deps.db, chatId);
+  return store.removeTarget(deps.db, chatId);
 }
 
 /** /channels: the list with one remove button per channel. */
 export async function channelsView(deps) {
-  const channels = await store.listChannels(deps.db);
+  const channels = await store.listTargets(deps.db);
   if (channels.length === 0) {
     return {
       text:
@@ -107,7 +107,7 @@ export async function handleMyChatMember(deps, update) {
   const title = chat.title ?? String(chat.id);
   let text;
   if (canPost(member)) {
-    const created = await store.upsertChannel(deps.db, {
+    const created = await store.upsertTarget(deps.db, {
       chatId: chat.id,
       title,
       username: chat.username ?? null,

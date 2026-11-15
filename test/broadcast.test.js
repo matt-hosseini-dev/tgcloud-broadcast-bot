@@ -13,7 +13,7 @@ const C = -1003;
 async function setup({ channels = [A, B], messages = [10] } = {}) {
   const deps = makeDeps();
   for (const [i, chatId] of channels.entries()) {
-    await store.upsertChannel(deps.db, {
+    await store.upsertTarget(deps.db, {
       chatId,
       title: `Chan ${String.fromCharCode(65 + i)}`,
       username: null,
@@ -30,7 +30,7 @@ async function setup({ channels = [A, B], messages = [10] } = {}) {
 
 test('publish copies the whole draft to every enabled channel in one call each', async () => {
   const { deps, draftId } = await setup({ messages: [12, 10, 11] });
-  await store.upsertChannel(deps.db, {
+  await store.upsertTarget(deps.db, {
     chatId: C,
     title: 'Off',
     username: null,
@@ -234,7 +234,7 @@ test('retry skips channels removed since the broadcast', async () => {
   const { deps, draftId } = await setup();
   deps.api.fail('copyMessages', 403, 'Forbidden');
   const { broadcastId } = await publishDraft(deps, { draftId, userId: BROADCASTER });
-  await store.removeChannel(deps.db, B);
+  await store.removeTarget(deps.db, B);
   deps.api.reset();
   deps.api.on('copyMessages', () => [{ message_id: 2 }]);
   await retryFailed(deps, { broadcastId, userId: BROADCASTER });
@@ -337,14 +337,14 @@ test('a storage error for one channel still finishes the publish and shows the r
 
 test('retry recovers deliveries left pending or retrying by an interrupted run, once they are stale', async () => {
   const deps = makeDeps();
-  await store.upsertChannel(deps.db, {
+  await store.upsertTarget(deps.db, {
     chatId: A,
     title: 'Chan A',
     username: null,
     addedBy: OWNER,
     now: NOW,
   });
-  await store.upsertChannel(deps.db, {
+  await store.upsertTarget(deps.db, {
     chatId: B,
     title: 'Chan B',
     username: null,

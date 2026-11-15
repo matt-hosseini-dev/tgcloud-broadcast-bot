@@ -53,9 +53,9 @@ test('broadcasters: add, get, list, rename, remove', async () => {
 test('channels: upsert, list enabled, remove', async () => {
   const db = createTestDb();
   const ch = { chatId: -1001, title: 'One', username: 'one', addedBy: 1, now: NOW };
-  assert.equal(await store.upsertChannel(db, ch), true);
-  assert.equal(await store.upsertChannel(db, { ...ch, title: 'One!' }), false);
-  await store.upsertChannel(db, {
+  assert.equal(await store.upsertTarget(db, ch), true);
+  assert.equal(await store.upsertTarget(db, { ...ch, title: 'One!' }), false);
+  await store.upsertTarget(db, {
     chatId: -1002,
     title: 'Two',
     username: null,
@@ -64,25 +64,25 @@ test('channels: upsert, list enabled, remove', async () => {
   });
   await db.run('UPDATE channels SET enabled = 0 WHERE chat_id = -1002');
   assert.deepEqual(
-    (await store.listChannels(db)).map((c) => c.title),
+    (await store.listTargets(db)).map((c) => c.title),
     ['One!', 'Two'],
   );
   assert.deepEqual(
-    (await store.listChannels(db, { enabledOnly: true })).map((c) => c.chat_id),
+    (await store.listTargets(db, { enabledOnly: true })).map((c) => c.chat_id),
     [-1001],
   );
-  assert.equal((await store.getChannel(db, -1001)).username, 'one');
-  assert.equal(await store.removeChannel(db, -1001), true);
-  assert.equal(await store.removeChannel(db, -1001), false);
+  assert.equal((await store.getTarget(db, -1001)).username, 'one');
+  assert.equal(await store.removeTarget(db, -1001), true);
+  assert.equal(await store.removeTarget(db, -1001), false);
 });
 
-test('upsertChannel re-enables a disabled channel', async () => {
+test('upsertTarget re-enables a disabled channel', async () => {
   const db = createTestDb();
   const ch = { chatId: -1001, title: 'One', username: null, addedBy: 1, now: NOW };
-  await store.upsertChannel(db, ch);
+  await store.upsertTarget(db, ch);
   await db.run('UPDATE channels SET enabled = 0');
-  await store.upsertChannel(db, ch);
-  assert.equal((await store.getChannel(db, -1001)).enabled, 1);
+  await store.upsertTarget(db, ch);
+  assert.equal((await store.getTarget(db, -1001)).enabled, 1);
 });
 
 test('openDraft creates one open draft per user, even concurrently', async () => {

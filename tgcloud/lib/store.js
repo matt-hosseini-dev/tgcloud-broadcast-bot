@@ -48,19 +48,19 @@ export async function removeBroadcaster(db, userId) {
 
 // ---- channels ----
 
-export function getChannel(db, chatId) {
+export function getTarget(db, chatId) {
   return db.get('SELECT * FROM channels WHERE chat_id = :id', { ':id': chatId });
 }
 
-export function listChannels(db, { enabledOnly = false } = {}) {
+export function listTargets(db, { enabledOnly = false } = {}) {
   return db.all(
     `SELECT * FROM channels ${enabledOnly ? 'WHERE enabled = 1' : ''} ORDER BY title COLLATE NOCASE, chat_id`,
   );
 }
 
 /** Adds a channel or refreshes its title/username and re-enables it. @returns true if new. */
-export async function upsertChannel(db, { chatId, title, username, addedBy, now }) {
-  const existed = await getChannel(db, chatId);
+export async function upsertTarget(db, { chatId, title, username, addedBy, now }) {
+  const existed = await getTarget(db, chatId);
   await db.run(
     `INSERT INTO channels (chat_id, title, username, enabled, added_by, created_at)
      VALUES (:id, :title, :username, 1, :by, :now)
@@ -71,7 +71,7 @@ export async function upsertChannel(db, { chatId, title, username, addedBy, now 
   return !existed;
 }
 
-export async function removeChannel(db, chatId) {
+export async function removeTarget(db, chatId) {
   const r = await db.run('DELETE FROM channels WHERE chat_id = :id', { ':id': chatId });
   return r.rowsAffected > 0;
 }

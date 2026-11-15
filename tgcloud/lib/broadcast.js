@@ -120,7 +120,7 @@ async function showReport(deps, broadcast) {
  */
 export async function publishDraft(deps, { draftId, userId, onStarted }) {
   const { db } = deps;
-  const channels = await store.listChannels(db, { enabledOnly: true });
+  const channels = await store.listTargets(db, { enabledOnly: true });
   if (channels.length === 0) return { ok: false, reason: 'no_channels' };
 
   const draft = await store.getDraft(db, draftId);
@@ -192,7 +192,7 @@ export async function retryFailed(deps, { broadcastId, userId, onStarted }) {
   try {
     const targets = [];
     for (const d of claimed) {
-      const channel = await store.getChannel(db, d.chat_id);
+      const channel = await store.getTarget(db, d.chat_id);
       if (channel) {
         targets.push({ chatId: d.chat_id, title: channel.title });
       } else {

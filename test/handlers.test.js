@@ -35,7 +35,7 @@ const tap = (userId, data, message = { message_id: 1000, chat: { id: userId } })
   onCallbackQuery({ id: `cq${updateId}`, from: { id: userId }, data, message }, ctx());
 
 async function addChannelRow(chatId, title) {
-  await store.upsertChannel(db, { chatId, title, username: null, addedBy: OWNER, now: NOW });
+  await store.upsertTarget(db, { chatId, title, username: null, addedBy: OWNER, now: NOW });
 }
 
 test('strangers are ignored silently', async () => {
@@ -134,7 +134,7 @@ test('owners add, list and remove channels', async () => {
   api.on('getChatMember', () => ({ status: 'administrator', user: BOT, can_post_messages: true }));
   await send(OWNER, 1, { text: '/addchannel @news' });
   assert.match(api.callsOf('sendMessage')[0].text, /added/);
-  assert.ok(await store.getChannel(db, -1001));
+  assert.ok(await store.getTarget(db, -1001));
 
   api.reset();
   await send(OWNER, 2, { text: '/channels' });
@@ -144,7 +144,7 @@ test('owners add, list and remove channels', async () => {
 
   api.reset();
   await tap(OWNER, remove, { message_id: 555, chat: { id: OWNER } });
-  assert.equal(await store.getChannel(db, -1001), null);
+  assert.equal(await store.getTarget(db, -1001), null);
   const edit = api.callsOf('editMessageText')[0];
   assert.equal(edit.message_id, 555);
   assert.match(edit.text, /No channels yet/);
@@ -163,7 +163,7 @@ test('broadcasters cannot use owner commands or owner buttons', async () => {
   await send(BROADCASTER, 1, { text: '/addchannel @news' });
   assert.match(api.callsOf('sendMessage')[0].text, /Only owners/);
   await tap(BROADCASTER, 'rmch:-1001');
-  assert.ok(await store.getChannel(db, -1001));
+  assert.ok(await store.getTarget(db, -1001));
   assert.match(api.callsOf('answerCallbackQuery')[0].text, /Only owners/);
   assert.equal(await store.getOpenDraft(db, BROADCASTER), null);
 });
@@ -236,9 +236,9 @@ test('my_chat_member registers a channel only for owners', async () => {
     new_chat_member: { status: 'administrator', user: BOT, can_post_messages: true },
   });
   await onMyChatMember(update(STRANGER), ctx());
-  assert.equal(await store.getChannel(db, -1001), null);
+  assert.equal(await store.getTarget(db, -1001), null);
   await onMyChatMember(update(OWNER), ctx());
-  assert.ok(await store.getChannel(db, -1001));
+  assert.ok(await store.getTarget(db, -1001));
 });
 
 test('a failed callback answer does not break the action', async () => {
