@@ -62,6 +62,8 @@ Owners can do everything. Broadcasters can only post. Everyone else is ignored.
 
 ## Limits
 
+- Telegram Desktop may show "No Results" in the chat picker: type the chat's name in
+  Search, or use the button on your phone.
 - Polls, paid media, invoices and giveaways can't be copied; those targets show as ⚠️.
 - Telegram's flood limit: short waits are retried once, longer ones show as failed.
   Tap Retry later.
